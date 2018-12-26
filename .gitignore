@@ -1,6 +1,12 @@
 Debug/
 Release/
 
+simple-link
+.settings
+.cproject
+.gdbinit
+.project
+
 autodependencies.d
 
 *.tmp
