@@ -10,7 +10,7 @@
 
 #define CLI_Write(X) DEBUG(X)
 #define Delay(X) Sleep(X)
-
+#define MAX_PACKET_SIZE (1472)
 
 
 
@@ -121,7 +121,7 @@ const _u8 RawData_Ping[] = {
  */
 static _i32 configureSimpleLinkToDefaultState();
 static _i32 initializeAppVariables();
-static _i32 TxContinues(_i16 channel);
+static _i32 RxEvaluation(_i16 channel);
 /*
  * STATIC FUNCTION DEFINITIONS -- End
  */
@@ -376,7 +376,7 @@ int main(int argc, char** argv)
 
     /* Transmits raw packets over the configured channel. There should be
      * minimum 50 ms delay between each packet */
-    retVal = TxContinues(CHANNEL);
+    retVal = RxEvaluation(CHANNEL);
     if(retVal < 0)
         CLI_Write(" Error in sending raw data over wlan PHY \n\r");
     else
@@ -511,7 +511,7 @@ static _i32 configureSimpleLinkToDefaultState()
     \warning        We must be disconnected from WLAN AP in order to succeed
                     changing to transmitter mode
 */
-static _i32 TxContinues(_i16 channel)
+static _i32 RxEvaluation(_i16 channel)
 {
     _i16 SockID = 0;
     _i32 Status = 0;
@@ -531,24 +531,34 @@ static _i32 TxContinues(_i16 channel)
     }
 
     /* make sure device is disconnected & auto mode is off */
-    SockID = sl_Socket(SL_AF_RF,SL_SOCK_RAW,channel);
+    SockID = sl_Socket(SL_AF_RF, SL_SOCK_RAW, channel);
     ASSERT_ON_ERROR(SockID);
+
+    _u32 rate = RATE;
+    Status = sl_SetSockOpt(SockID, SL_SOL_PHY_OPT, SL_SO_PHY_RATE, &rate, sizeof(rate));
+    assert(Status == 0);
+
+    _u32 preamble = PREAMBLE;
+    Status = sl_SetSockOpt(SockID, SL_SOL_PHY_OPT, SL_SO_PHY_PREAMBLE, &preamble, sizeof(preamble));
+    assert(Status == 0);
 
     Len = sizeof(RawData_Ping);
 
-    while (count < NO_OF_PACKETS)
-    {
-        Status = sl_Send(SockID, RawData_Ping, Len,
-               SL_RAW_RF_TX_PARAMS(channel, RATE, POWER_LEVEL_TONE, PREAMBLE));
-        if(Status < 0)
-        {
-               sl_Close(SockID);
-               ASSERT_ON_ERROR(Status);
-           }
+    _u8 buffer[MAX_PACKET_SIZE];
 
-           count++;
-        /* 100 ms Delay between each packet*/
-        Delay(100);
+    SlTransceiverRxOverHead_t *rxHeader = buffer;
+    while (TRUE)
+    {
+    	Status = sl_Recv(SockID, buffer, MAX_PACKET_SIZE, 0);
+
+    	if (Status < 0) {
+    		DEBUG("Broken socket. Exiting...");
+    		sl_Close(SockID);
+    		return -1;
+    	}
+
+    	DEBUG("[%lu]Recv: %d bytes; ch %u; rate: %u; rssi %d", rxHeader->timestamp, Status, rxHeader->channel, rxHeader->rate, rxHeader->rssi);
+
     }
 
     Status = sl_Close(SockID);
