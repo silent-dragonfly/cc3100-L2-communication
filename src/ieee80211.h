@@ -1,6 +1,7 @@
 #ifndef __IEEE_802_11__
 #define __IEEE_802_11__
 
+#include <stdint.h>
 
 typedef enum Types {
 	TYPE_MANAGEMENT = 0,
@@ -13,17 +14,42 @@ typedef enum DATA_Subtypes {
 };
 
 typedef struct FrameControl {
-	unsigned int ProtocolVersion : 2;
-	unsigned int Type : 2;
-	unsigned int Subtype : 4;
-	unsigned int ToDS : 1;
-	unsigned int FromDS : 1;
-	unsigned int MoreFragments : 1;
-	unsigned int Retry : 1;
-	unsigned int PowerManagement : 1;
-	unsigned int MoreData : 1;
-	unsigned int ProtectedFrame : 1;
-	unsigned int HTC_Order : 1;
+	uint8_t ProtocolVersion : 2;
+	uint8_t Type : 2;
+	uint8_t Subtype : 4;
+	uint8_t ToDS : 1;
+	uint8_t FromDS : 1;
+	uint8_t MoreFragments : 1;
+	uint8_t Retry : 1;
+	uint8_t PowerManagement : 1;
+	uint8_t MoreData : 1;
+	uint8_t ProtectedFrame : 1;
+	uint8_t HTC_Order : 1;
 } FrameControl;
+
+typedef struct SequenceControl {
+	uint16_t FragmentNumber : 4;
+	uint16_t SequenceNumber : 12;
+} SequenceControl;
+
+typedef struct QoSControl {
+	// TODO: write QoS Control bits
+	uint16_t TODO;
+} QoSControl;
+
+#define MAX_DATA_SIZE (100)
+
+typedef struct DataQoSFrame_FromDSToSTA {
+	FrameControl FrameControl;
+	uint16_t Duration;
+	uint8_t DestinationMAC[6];
+	uint8_t BSSIDMAC[6];
+	uint8_t SourceMAC[6];
+	SequenceControl SequenceControl;
+	QoSControl QoSControl;
+
+	uint8_t Data[MAX_DATA_SIZE];
+} DataQoSFrame_FromDSToSTA;
+
 
 #endif // __IEEE_802_11__

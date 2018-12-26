@@ -16,7 +16,8 @@
 
 
 
-
+static _i32 main_pinger();
+static _i32 main_ponger();
 
 
 
@@ -51,72 +52,36 @@ typedef enum{
  * GLOBAL VARIABLES -- Start
  */
 _u8 g_Status = 0;
+const int END_COUNT = 100;
+const int TRY_RECIVE_MAX = 100;
+const ROLE_OFFSET = 25;
+const COUNTER_OFFSET = 26;
 
-union
-{
-  _u8 BsdBuf[BUF_SIZE];
-  _u32 demobuf[BUF_SIZE/4];
-} uBuf;
+DataQoSFrame_FromDSToSTA FRAME = {
+   		.FrameControl = (struct FrameControl){
+   				.Type = TYPE_DATA,
+   				.Subtype = DATA_SUBTYPE_QOS,
+   				.FromDS = 1
+   		},
+   		.Duration = 0x002C,
+   	    .DestinationMAC = {0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA},
+   	    .BSSIDMAC = {0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB},
+   		.SourceMAC = {0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB},
+   		.SequenceControl = (struct SequenceControl){
+   			.FragmentNumber = 0,
+   			.SequenceNumber = 0x428,
+   		},
+   		.QoSControl = (struct QoSControl){0},
+		.Data = {
+				/* LLC */
+			   0xAA, // DSAP
+			   0xAA, // SSAP
+			   0x03, // Control field
+			   0x00, 0x00, 0x00, // Organization Code: Encapsulated Ethernet
+			   0x12, 0x34,},
+   };
 
-
-const int DEST_MAC_OFFSET = 4;
-
-const _u8 RawData_Ping[] = {
-                   0x88,   /* version , type sub type
-                   	   1000      - subtype 8 QoS Data
-                   	   .... 10   - type 2 Data frame
-                   	   .... ..00 - version 0
-                   */
-                   0x02,   /* Frame control flag
-                   	   0000      ...
-                   	   .... 0    Retry
-                   	   .... .0   More fragments
-                   	   .... ..1  from DS = true : from DS to STA
-                   	   .... ...0 to DS = false  :
-                   	   	   ->
-                   	   	   Addr1=DA, TA=BSSID, Addr3=SA,Addr4=N/A
-
-                  */
-                   0x2C, 0x00, /* duration */
-                   0x00, 0x23, 0x75, 0x55,0x55, 0x55,   /* destination MAC */
-                   0x00, 0x22, 0x75, 0x55,0x55, 0x55,   /* bssid MAC*/
-                   0x00, 0x22, 0x75, 0x55,0x55, 0x55,   /* source MAC */
-                   0x80, 0x42, /* Seq control:
-                   4    2    8    0
-                   .... .... .... 0000 - Fragment Number, 0 if the fragment is A-MSDU
-                   0100 0010 1000 .... - Sequence Number: 1064
-                   */
-				   0x00, 0x00, /* QoS Control, as soon as subtype with QoS (b7)
-				   .... .... .... 0000 = TID: 0
-				   .... .... .... .000 = Priority: Best Effort (0)
-				   .... .... ...0 ....
-				   .... .... .00. ....
- 				   .... .... 0... .... = Payload Type MSDU
-				   0000 0000 .... ....
-				   */
-				   /* LLC */
-                   0xAA, // DSAP
-				   0xAA, // SSAP
-				   0x03, // Control field
-				   0x00, 0x00, 0x00, // Organization Code: Encapsulated Ethernet
-				   0x08, 0x00, // Type: IPv4
-                   /*---- ip header start -----*/
-                   0x45, 0x00, 0x00, 0x54, 0x96, 0xA1, 0x00, 0x00, 0x40, 0x01,
-                   0x57, 0xFA,                          /* checksum */
-                   0xc0, 0xa8, 0x01, 0x64,              /* src ip */
-                   0xc0, 0xa8, 0x01, 0x65,              /* dest ip  */
-                   /* payload - ping/icmp */
-                   0x08, 0x00, 0xA5, 0x51,
-                   0x5E, 0x18, 0x00, 0x00, 0x41, 0x08, 0xBB, 0x8D, 0x00, 0x00,
-                   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                   0x00, 0x00, 0x00, 0x00};
-/*
- * GLOBAL VARIABLES -- End
- */
+uint8_t BUFFER[MAX_PACKET_SIZE];
 
 /*
  * STATIC FUNCTION DEFINITIONS -- Start
@@ -327,16 +292,31 @@ void SimpleLinkSockEventHandler(SlSockEvent_t *pSock)
  * ASYNCHRONOUS EVENT HANDLERS -- End
  */
 
-/*
- * Application's entry point
- */
+
+typedef enum AppRole {
+	APP_PINGER = 0x55,
+	APP_PONGER = 0xDD
+} AppRole;
+
 int main(int argc, char** argv)
 {
+	AppRole role;
+
+ 	if (argc != 2) {
+		DEBUG("USAGE: cc3100-L2-communication [PINGER|PONGER]");
+		return -1;
+	}
+
+	if (strcmp(argv[1], "PINGER") == 0) {
+		role = APP_PINGER;
+	} else if (strcmp(argv[1], "PONGER") == 0) {
+		role = APP_PONGER;
+	} else {
+		DEBUG("[ERROR] Wrong role: %s", argv[1]);
+		return -1;
+	}
+
     _i32 retVal = -1;
-
-    retVal = initializeAppVariables();
-    ASSERT_ON_ERROR(retVal);
-
 
     /*
      * Following function configures the device to default state by cleaning
@@ -352,12 +332,14 @@ int main(int argc, char** argv)
     retVal = configureSimpleLinkToDefaultState();
     if(retVal < 0)
     {
-        CLI_Write(" Failed to configure the device in its default state \n\r");
+        DEBUG(" Failed to configure the device in its default state");
 
         LOOP_FOREVER();
     }
+    DEBUG(" Device is configured in default state");
 
-    CLI_Write(" Device is configured in default state \n\r");
+    retVal = initializeAppVariables();
+    ASSERT_ON_ERROR(retVal);
 
     /*
      * Assumption is that the device is configured in station mode already
@@ -365,25 +347,26 @@ int main(int argc, char** argv)
      */
     /* Initializing the CC3100 device */
     retVal = sl_Start(0, 0, 0);
-    if ((retVal < 0) ||
-        (ROLE_STA != retVal) )
+    if ((retVal < 0) || (ROLE_STA != retVal) )
     {
-        CLI_Write(" Failed to start the device \n\r");
+        DEBUG(" Failed to start the device");
         LOOP_FOREVER();
     }
+    DEBUG(" Device started as STATION");
 
-    CLI_Write(" Device started as STATION \n\r");
+    DEBUG("Start L1 Ping-Pong");
 
-    CLI_Write(" Receiving raw data over wlan PHY \n\r");
+    if (role == APP_PINGER) {
+    	retVal = main_pinger();
+    } else if (role == APP_PONGER) {
+    	retVal = main_ponger();
+    } else {
+    	assert(0);
+    }
 
-    /* Transmits raw packets over the configured channel. There should be
-     * minimum 50 ms delay between each packet */
-    retVal = RxEvaluation(CHANNEL);
-    if(retVal < 0)
-        CLI_Write(" Error in sending raw data over wlan PHY \n\r");
-    else
-        CLI_Write(" Raw data sent over wlan PHY successfully\n\r");
-
+    if(retVal < 0) {
+    	DEBUG("[ERROR] Bad exit from main function");
+    }
 
     /* Stop the CC3100 device */
     retVal = sl_Stop(SL_STOP_TIMEOUT);
@@ -513,6 +496,194 @@ static _i32 configureSimpleLinkToDefaultState()
     \warning        We must be disconnected from WLAN AP in order to succeed
                     changing to transmitter mode
 */
+
+static _i32 main_pinger()
+{
+	_i16 SockID = sl_Socket(SL_AF_RF, SL_SOCK_RAW, CHANNEL);
+	ASSERT_ON_ERROR(SockID);
+
+	_i32 Status = 0;
+
+	for (int counter = 0;  counter < END_COUNT; ) {
+
+		FRAME.Data[ROLE_OFFSET] = APP_PINGER;
+		FRAME.Data[COUNTER_OFFSET] = counter;
+
+		Status = sl_Send(SockID, (_u8*)&FRAME, sizeof(FRAME),
+		                 SL_RAW_RF_TX_PARAMS(CHANNEL, RATE, POWER_LEVEL_TONE, PREAMBLE));
+		if(Status < 0)
+		{
+			DEBUG("[ERROR] while sending packet");
+			sl_Close(SockID);
+			return -1;
+		}
+
+		DEBUG("[PINGER] send %d", counter);
+
+		BOOLEAN RESP_RECEIVED = FALSE;
+		for (int rx_counter = 0; rx_counter < TRY_RECIVE_MAX; rx_counter++) {
+
+			Status = sl_Recv(SockID, BUFFER, MAX_PACKET_SIZE, 0);
+			SlTransceiverRxOverHead_t *rxHeader = BUFFER;
+			DataQoSFrame_FromDSToSTA *recv_fr = (DataQoSFrame_FromDSToSTA*)(BUFFER + sizeof(SlTransceiverRxOverHead_t));
+			FrameControl *fc = &recv_fr->FrameControl;
+
+			if(Status < 0)
+			{
+				DEBUG("[ERROR] while receiving packet");
+				sl_Close(SockID);
+				return -1;
+			}
+
+			if (fc->ProtocolVersion != 0) {
+				DEBUG("[MAGIC] Protocol version is not a zero!!!!!!!!");
+				continue;
+			}
+
+			if (fc->Type != TYPE_DATA) {
+				continue;
+			}
+
+			if (fc->Subtype != DATA_SUBTYPE_QOS) {
+				continue;
+			}
+
+			if (memcmp(FRAME.DestinationMAC, recv_fr->DestinationMAC, 6) != 0) {
+				continue;
+			}
+
+			if (recv_fr->Data[ROLE_OFFSET] != APP_PONGER) {
+				DEBUG("[PINGER] Unexpected role of sender: %d", recv_fr->Data[ROLE_OFFSET]);
+				continue;
+			}
+
+			if (recv_fr->Data[COUNTER_OFFSET] != counter) {
+				DEBUG("[PINGER] Unexpected counter in response: %d", recv_fr->Data[COUNTER_OFFSET]);
+				continue;
+			}
+
+			DEBUG("[%lu]Recv: %d | %d bytes; ch %u; rate: %u; rssi %d",
+					recv_fr->Data[COUNTER_OFFSET], rxHeader->timestamp, Status, rxHeader->channel, rxHeader->rate, rxHeader->rssi);
+
+			counter++;
+			RESP_RECEIVED = TRUE;
+			break;
+		}
+
+		if (!RESP_RECEIVED) {
+			DEBUG("[WARNING] not receive answer from PONGER, retry");
+		}
+	}
+
+	DEBUG("[PINGER] end of procedure. Exiting...");
+
+	Status = sl_Close(SockID);
+	ASSERT_ON_ERROR(Status);
+
+	return SUCCESS;
+}
+
+static _i32 main_ponger()
+{
+	int recv_counter = -1;
+
+	_i16 SockID = sl_Socket(SL_AF_RF, SL_SOCK_RAW, CHANNEL);
+	ASSERT_ON_ERROR(SockID);
+
+	_i32 Status = 0;
+
+	// while we are not received the last package from pinger
+	while (recv_counter != (END_COUNT - 1)) {
+
+		BOOLEAN RESP_RECEIVED = FALSE;
+		for (int rx_counter = 0; rx_counter < TRY_RECIVE_MAX; rx_counter++) {
+
+			Status = sl_Recv(SockID, BUFFER, MAX_PACKET_SIZE, 0);
+			SlTransceiverRxOverHead_t *rxHeader = BUFFER;
+			DataQoSFrame_FromDSToSTA *recv_fr = (DataQoSFrame_FromDSToSTA*)(BUFFER + sizeof(SlTransceiverRxOverHead_t));
+			FrameControl *fc = &recv_fr->FrameControl;
+
+			if(Status < 0)
+			{
+				DEBUG("[ERROR] while receiving packet");
+				sl_Close(SockID);
+				return -1;
+			}
+
+			if (fc->ProtocolVersion != 0) {
+				DEBUG("[MAGIC] Protocol version is not a zero!!!!!!!!");
+				continue;
+			}
+
+			if (fc->Type != TYPE_DATA) {
+				continue;
+			}
+
+			if (fc->Subtype != DATA_SUBTYPE_QOS) {
+				continue;
+			}
+
+			if (memcmp(FRAME.DestinationMAC, recv_fr->DestinationMAC, 6) != 0) {
+				continue;
+			}
+
+			if (recv_fr->Data[ROLE_OFFSET] != APP_PINGER) {
+				DEBUG("[PONGER] Unexpected role of sender: %d", recv_fr->Data[ROLE_OFFSET]);
+				continue;
+			}
+
+			DEBUG("[%lu] Recv: %d | %d bytes; ch %u; rate: %u; rssi %d",
+					recv_fr->Data[COUNTER_OFFSET], rxHeader->timestamp, Status, rxHeader->channel, rxHeader->rate, rxHeader->rssi);
+
+			recv_counter = recv_fr->Data[COUNTER_OFFSET];
+			RESP_RECEIVED = TRUE;
+			break;
+		}
+
+		if (!RESP_RECEIVED) {
+			DEBUG("[WARNING] not receive answer from PINGER. recv_counter %d", recv_counter);
+		}
+
+		// There is nothing to re-send, we are awaiting the first packet from PINGER
+		if (recv_counter < 0) {
+			continue;
+		}
+
+		FRAME.Data[ROLE_OFFSET] = APP_PONGER;
+		FRAME.Data[COUNTER_OFFSET] = recv_counter;
+
+		Status = sl_Send(SockID, (_u8*)&FRAME, sizeof(FRAME),
+						 SL_RAW_RF_TX_PARAMS(CHANNEL, RATE, POWER_LEVEL_TONE, PREAMBLE));
+		if(Status < 0)
+		{
+			DEBUG("[ERROR] while sending packet");
+			sl_Close(SockID);
+			return -1;
+		}
+
+		DEBUG("[PONGER] send %d", recv_counter);
+	}
+
+	DEBUG("[PONGER] Sending finishing 20 packets to give chance PINGER to finish");
+	for (int i = 0; i < 20; i++) {
+		Status = sl_Send(SockID, (_u8*)&FRAME, sizeof(FRAME),
+								 SL_RAW_RF_TX_PARAMS(CHANNEL, RATE, POWER_LEVEL_TONE, PREAMBLE));
+		if(Status < 0)
+		{
+			DEBUG("[ERROR] while sending packet");
+			sl_Close(SockID);
+			return -1;
+		}
+	}
+
+	DEBUG("[PONGER] end of procedure. Exiting...");
+
+	Status = sl_Close(SockID);
+	ASSERT_ON_ERROR(Status);
+
+	return SUCCESS;
+}
+
 static _i32 RxEvaluation(_i16 channel)
 {
     _i16 SockID = 0;
@@ -536,54 +707,42 @@ static _i32 RxEvaluation(_i16 channel)
     SockID = sl_Socket(SL_AF_RF, SL_SOCK_RAW, channel);
     ASSERT_ON_ERROR(SockID);
 
-//    Changing rate is not affect for receiving
-//    _u32 rate = RATE;
-//    Status = sl_SetSockOpt(SockID, SL_SOL_PHY_OPT, SL_SO_PHY_RATE, &rate, sizeof(rate));
-//    assert(Status == 0);
 
-    _u32 preamble = PREAMBLE;
-    Status = sl_SetSockOpt(SockID, SL_SOL_PHY_OPT, SL_SO_PHY_PREAMBLE, &preamble, sizeof(preamble));
-    assert(Status == 0);
 
-    Len = sizeof(RawData_Ping);
+//    SlTransceiverRxOverHead_t *rxHeader = buffer;
 
-    _u8 buffer[MAX_PACKET_SIZE];
-
-    SlTransceiverRxOverHead_t *rxHeader = buffer;
-	FrameControl *fc = buffer + sizeof(SlTransceiverRxOverHead_t);
-
-    while (TRUE)
-    {
-    	Status = sl_Recv(SockID, buffer, MAX_PACKET_SIZE, 0);
-
-    	if (Status < 0) {
-    		DEBUG("Broken socket. Exiting...");
-    		sl_Close(SockID);
-    		return -1;
-    	}
-
-    	if (fc->ProtocolVersion != 0) {
-    		DEBUG("[MAGIC] Protocol version is not a zero!!!!!!!!");
-    		continue;
-    	}
-
-    	if (fc->Type != TYPE_DATA) {
-    		continue;
-    	}
-
-    	if (fc->Subtype != DATA_SUBTYPE_QOS) {
-    		continue;
-    	}
-
-    	if (memcmp(&(RawData_Ping[DEST_MAC_OFFSET]),
-    			   &(buffer[sizeof(SlTransceiverRxOverHead_t) + DEST_MAC_OFFSET]),
-				   6) != 0) {
-    		continue;
-    	}
-
-    	DEBUG("[%lu]Recv: %d bytes; ch %u; rate: %u; rssi %d", rxHeader->timestamp, Status, rxHeader->channel, rxHeader->rate, rxHeader->rssi);
-
-    }
+//    while (TRUE)
+//    {
+//    	Status = sl_Recv(SockID, buffer, MAX_PACKET_SIZE, 0);
+//
+//    	if (Status < 0) {
+//    		DEBUG("Broken socket. Exiting...");
+//    		sl_Close(SockID);
+//    		return -1;
+//    	}
+//
+//    	if (fc->ProtocolVersion != 0) {
+//    		DEBUG("[MAGIC] Protocol version is not a zero!!!!!!!!");
+//    		continue;
+//    	}
+//
+//    	if (fc->Type != TYPE_DATA) {
+//    		continue;
+//    	}
+//
+//    	if (fc->Subtype != DATA_SUBTYPE_QOS) {
+//    		continue;
+//    	}
+//
+//    	if (memcmp(&(RawData_Ping[DEST_MAC_OFFSET]),
+//    			   &(buffer[sizeof(SlTransceiverRxOverHead_t) + DEST_MAC_OFFSET]),
+//				   6) != 0) {
+//    		continue;
+//    	}
+//
+//    	DEBUG("[%lu]Recv: %d bytes; ch %u; rate: %u; rssi %d", rxHeader->timestamp, Status, rxHeader->channel, rxHeader->rate, rxHeader->rssi);
+//
+//    }
 
     Status = sl_Close(SockID);
     ASSERT_ON_ERROR(Status);
@@ -595,7 +754,6 @@ static _i32 RxEvaluation(_i16 channel)
 static _i32 initializeAppVariables()
 {
     g_Status = 0;
-    pal_Memset(uBuf.BsdBuf, 0, sizeof(uBuf));
 
     return SUCCESS;
 }
