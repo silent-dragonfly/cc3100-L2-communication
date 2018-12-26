@@ -5,7 +5,7 @@
 
 
 
-
+#include "ieee80211.h"
 #include "windows.h"
 
 #define CLI_Write(X) DEBUG(X)
@@ -58,6 +58,8 @@ union
   _u32 demobuf[BUF_SIZE/4];
 } uBuf;
 
+
+const int DEST_MAC_OFFSET = 4;
 
 const _u8 RawData_Ping[] = {
                    0x88,   /* version , type sub type
@@ -372,7 +374,7 @@ int main(int argc, char** argv)
 
     CLI_Write(" Device started as STATION \n\r");
 
-    CLI_Write(" Sending raw data over wlan PHY \n\r");
+    CLI_Write(" Receiving raw data over wlan PHY \n\r");
 
     /* Transmits raw packets over the configured channel. There should be
      * minimum 50 ms delay between each packet */
@@ -534,9 +536,10 @@ static _i32 RxEvaluation(_i16 channel)
     SockID = sl_Socket(SL_AF_RF, SL_SOCK_RAW, channel);
     ASSERT_ON_ERROR(SockID);
 
-    _u32 rate = RATE;
-    Status = sl_SetSockOpt(SockID, SL_SOL_PHY_OPT, SL_SO_PHY_RATE, &rate, sizeof(rate));
-    assert(Status == 0);
+//    Changing rate is not affect for receiving
+//    _u32 rate = RATE;
+//    Status = sl_SetSockOpt(SockID, SL_SOL_PHY_OPT, SL_SO_PHY_RATE, &rate, sizeof(rate));
+//    assert(Status == 0);
 
     _u32 preamble = PREAMBLE;
     Status = sl_SetSockOpt(SockID, SL_SOL_PHY_OPT, SL_SO_PHY_PREAMBLE, &preamble, sizeof(preamble));
@@ -547,6 +550,8 @@ static _i32 RxEvaluation(_i16 channel)
     _u8 buffer[MAX_PACKET_SIZE];
 
     SlTransceiverRxOverHead_t *rxHeader = buffer;
+	FrameControl *fc = buffer + sizeof(SlTransceiverRxOverHead_t);
+
     while (TRUE)
     {
     	Status = sl_Recv(SockID, buffer, MAX_PACKET_SIZE, 0);
@@ -555,6 +560,25 @@ static _i32 RxEvaluation(_i16 channel)
     		DEBUG("Broken socket. Exiting...");
     		sl_Close(SockID);
     		return -1;
+    	}
+
+    	if (fc->ProtocolVersion != 0) {
+    		DEBUG("[MAGIC] Protocol version is not a zero!!!!!!!!");
+    		continue;
+    	}
+
+    	if (fc->Type != TYPE_DATA) {
+    		continue;
+    	}
+
+    	if (fc->Subtype != DATA_SUBTYPE_QOS) {
+    		continue;
+    	}
+
+    	if (memcmp(&(RawData_Ping[DEST_MAC_OFFSET]),
+    			   &(buffer[sizeof(SlTransceiverRxOverHead_t) + DEST_MAC_OFFSET]),
+				   6) != 0) {
+    		continue;
     	}
 
     	DEBUG("[%lu]Recv: %d bytes; ch %u; rate: %u; rssi %d", rxHeader->timestamp, Status, rxHeader->channel, rxHeader->rate, rxHeader->rssi);
