@@ -319,28 +319,39 @@ int main(int argc, char** argv) {
 	 */
 	retVal = configureSimpleLinkToDefaultState();
 	if (retVal < 0) {
-		DEBUG(" Failed to configure the device in its default state");
-
-		LOOP_FOREVER()
-		;
+		DEBUG("[ERROR] Failed to configure the device in its default state");
+		system("PAUSE");
+		return -1;
 	}
 	DEBUG(" Device is configured in default state");
 
 	retVal = initializeAppVariables();
 	ASSERT_ON_ERROR(retVal);
 
-	/*
-	 * Assumption is that the device is configured in station mode already
-	 * and it is in its default state
-	 */
-	/* Initializing the CC3100 device */
 	retVal = sl_Start(0, 0, 0);
 	if ((retVal < 0) || (ROLE_STA != retVal)) {
-		DEBUG(" Failed to start the device");
-		LOOP_FOREVER()
-		;
+		DEBUG("[ERROR] Failed to start the device as STATION");
+		system("PAUSE");
+		return -1;
 	}
 	DEBUG(" Device started as STATION");
+
+	retVal = sl_WlanPolicySet(SL_POLICY_CONNECTION, SL_CONNECTION_POLICY(0, 0, 0, 0, 0),
+			NULL, 0);
+	if (retVal < 0) {
+		DEBUG("[ERROR] Failed to clear WLAN_CONNECTION_POLICY");
+		system("PAUSE");
+		return -1;
+	}
+
+	retVal = sl_WlanDisconnect();
+
+	if (retVal == 0) {
+		DEBUG("Disconnected from AP");
+	} else {
+		// already disconnected
+	}
+	DEBUG("Connection policy is cleared and CC3100 has been disconnected");
 
 	DEBUG("Start L1 Ping-Pong");
 
@@ -358,9 +369,9 @@ int main(int argc, char** argv) {
 
 	/* Stop the CC3100 device */
 	retVal = sl_Stop(SL_STOP_TIMEOUT);
-	if (retVal < 0)
-		LOOP_FOREVER()
-	;
+	if (retVal < 0) {
+		DEBUG("[ERROR] Can not stop device properly");
+	}
 
 	system("PAUSE");
 	return 0;
@@ -471,23 +482,6 @@ static _i32 configureSimpleLinkToDefaultState() {
 
 	return retVal; /* Success */
 }
-
-/*!
- \brief Entering raw Transmitter\Receiver mode in order to send raw data
- over the WLAN PHY
-
- This function shows how to send raw data, in this case ping packets over
- the air in transmitter mode.
-
- \param[in]      Channel number on which the data will be sent
-
- \return         0 on success, Negative on Error.
-
- \note
-
- \warning        We must be disconnected from WLAN AP in order to succeed
- changing to transmitter mode
- */
 
 static _i32 main_pinger() {
 	_i16 SockID = sl_Socket(SL_AF_RF, SL_SOCK_RAW, CHANNEL);
