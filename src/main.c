@@ -247,7 +247,7 @@ void SimpleLinkGeneralEventHandler(SlDeviceEvent_t *pDevEvent) {
  */
 void SimpleLinkSockEventHandler(SlSockEvent_t *pSock) {
 	if (pSock == NULL) {
-		CLI_Write(" [SOCK EVENT] NULL Pointer Error \n\r");
+		DEBUG(" [SOCK EVENT] NULL Pointer Error");
 		return;
 	}
 
@@ -263,19 +263,13 @@ void SimpleLinkSockEventHandler(SlSockEvent_t *pSock) {
 		 * SlSockEventData_u *pEventData = NULL;
 		 * pEventData = & pSock->socketAsyncEvent;
 		 */
-		switch (pSock->socketAsyncEvent.SockTxFailData.status) {
-		case SL_ECLOSE:
-			CLI_Write(
-					" [SOCK EVENT] Close socket operation failed to transmit all queued packets\n\r");
-			break;
-		default:
-			CLI_Write(" [SOCK EVENT] Unexpected event \n\r");
-			break;
-		}
+		DEBUG("[SL_SOCKET_TX_FAILED_EVENT] sd: %u, status: %d",
+				pSock->socketAsyncEvent.SockTxFailData.sd,
+				pSock->socketAsyncEvent.SockTxFailData.status);
 		break;
 
 	default:
-		CLI_Write(" [SOCK EVENT] Unexpected event \n\r");
+		DEBUG("[SOCK EVENT] Unexpected event \n\r");
 		break;
 	}
 }
@@ -336,7 +330,8 @@ int main(int argc, char** argv) {
 	}
 	DEBUG(" Device started as STATION");
 
-	retVal = sl_WlanPolicySet(SL_POLICY_CONNECTION, SL_CONNECTION_POLICY(0, 0, 0, 0, 0),
+	retVal = sl_WlanPolicySet(SL_POLICY_CONNECTION,
+			SL_CONNECTION_POLICY(0, 0, 0, 0, 0),
 			NULL, 0);
 	if (retVal < 0) {
 		DEBUG("[ERROR] Failed to clear WLAN_CONNECTION_POLICY");
